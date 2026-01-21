@@ -1148,6 +1148,7 @@ elif st.session_state.step == "history":
                 "bulk_lines": bulk_lines,
             }
             st.write("DEBUG VIN:", v.get("vin"))
+            st.write("DEBUG USER:", st.session_state.get("auth_user"))
 
             save_template_submission_if_manager(v, st.session_state.intervals)
 
