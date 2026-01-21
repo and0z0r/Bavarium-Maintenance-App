@@ -16,23 +16,18 @@
 # - Per-service due-soon thresholds (miles + months) configurable in Settings page
 #
 # Run: python -m streamlit run app.py
+
+import streamlit as st
+from datetime import date
+import requests
+from typing import Optional
 import streamlit as st
 import streamlit_authenticator as stauth
 
-# -------------------------
-# LOGIN (TEMP)
-# -------------------------
-
 credentials = {
     "usernames": {
-        "andrew": {
-            "name": "Andrew Gomes",
-            "password": "$2b$12$X4vW8gL5J6xj2l5E4J2l5O1cC7N9uN7zZ9K6XG7H9JZKp8q5C"
-        },
-        "erin": {
-            "name": "Erin Gomes",
-            "password": "$2b$12$K9xW4N8z3L5E2J5O1cC7N9uN7Z9K6XG7H9JZKp8q5C6xj2l5"
-        }
+        "andrew": {"name": "Andrew Gomes", "password": "PLACEHOLDER_HASH"},
+        "erin": {"name": "Erin Gomes", "password": "PLACEHOLDER_HASH"},
     }
 }
 
@@ -43,7 +38,7 @@ authenticator = stauth.Authenticate(
     30
 )
 
-name, authentication_status, username = authenticator.login("Login", "main")
+name, authentication_status, username = authenticator.login(location="main")
 
 if authentication_status is False:
     st.error("Username/password is incorrect")
@@ -52,13 +47,8 @@ elif authentication_status is None:
     st.info("Please log in to continue.")
     st.stop()
 
-authenticator.logout("Logout", "sidebar")
+authenticator.logout(location="sidebar")
 st.session_state["user"] = {"username": username, "name": name}
-
-import streamlit as st
-from datetime import date
-import requests
-from typing import Optional
 
 st.set_page_config(page_title="Bavarium Maintenance Planner", layout="centered")
 
