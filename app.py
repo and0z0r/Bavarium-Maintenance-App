@@ -16,34 +16,31 @@
 # - Per-service due-soon thresholds (miles + months) configurable in Settings page
 #
 # Run: python -m streamlit run app.py
-
-import streamlit as st
-from datetime import date
-import requests
-from typing import Optional
 import streamlit as st
 import streamlit_authenticator as stauth
 
 # -------------------------
-# LOGIN (TEMP: hardcoded users)
-# We'll move these into Streamlit Secrets next.
+# LOGIN (TEMP)
 # -------------------------
-names = ["Andrew Gomes", "Erin Gomes"]
-usernames = ["andrew", "erin"]
 
-# TEMP passwords (we'll hash properly next)
-passwords = ["changeme1", "changeme2"]
-
-hashed_passwords = stauth.Hasher(passwords).generate()
+credentials = {
+    "usernames": {
+        "andrew": {
+            "name": "Andrew Gomes",
+            "password": "$2b$12$X4vW8gL5J6xj2l5E4J2l5O1cC7N9uN7zZ9K6XG7H9JZKp8q5C"
+        },
+        "erin": {
+            "name": "Erin Gomes",
+            "password": "$2b$12$K9xW4N8z3L5E2J5O1cC7N9uN7Z9K6XG7H9JZKp8q5C6xj2l5"
+        }
+    }
+}
 
 authenticator = stauth.Authenticate(
-    {"usernames": {
-        usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
-        usernames[1]: {"name": names[1], "password": hashed_passwords[1]},
-    }},
-    "bavarium_auth",   # cookie name
-    "bavarium_cookie_key_change_me",  # cookie key (we'll replace)
-    30                 # days
+    credentials,
+    "bavarium_auth",
+    "bavarium_cookie_key_change_me",
+    30
 )
 
 name, authentication_status, username = authenticator.login("Login", "main")
@@ -51,12 +48,17 @@ name, authentication_status, username = authenticator.login("Login", "main")
 if authentication_status is False:
     st.error("Username/password is incorrect")
     st.stop()
-if authentication_status is None:
+elif authentication_status is None:
     st.info("Please log in to continue.")
     st.stop()
 
 authenticator.logout("Logout", "sidebar")
 st.session_state["user"] = {"username": username, "name": name}
+
+import streamlit as st
+from datetime import date
+import requests
+from typing import Optional
 
 st.set_page_config(page_title="Bavarium Maintenance Planner", layout="centered")
 
