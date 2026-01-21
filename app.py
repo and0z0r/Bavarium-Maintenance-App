@@ -22,47 +22,52 @@ from datetime import date
 import requests
 from typing import Optional
 import streamlit as st
-import streamlit_authenticator as stauth
 
 # -------------------------
-# LOGIN (TEMP: plain text; will move to Streamlit Secrets next)
+# SIMPLE LOGIN (stable)
 # -------------------------
-credentials = {
-    "usernames": {
-        "andrew": {"name": "Andrew Gomes", "password": "changeme1"},
-        "erin": {"name": "Erin Gomes", "password": "changeme2"},
-    }
-}
+def require_login():
+    # Read users from Streamlit secrets
+    creds = st.secrets["credentials"]["usernames"]
 
-authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name="bavarium_auth",
-    cookie_key="bavarium_cookie_key_change_me",
-    cookie_expiry_days=30,
-    auto_hash=True,  # important: hashes the plain text above automatically
-)
+    # Session flag
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+        st.session_state.auth_user = None
+        st.session_state.auth_name = None
 
-# Use keyword args to survive API changes
-login_result = authenticator.login(location="main")
+    # If already logged in, show logout in sidebar and continue
+    if st.session_state.auth_ok:
+        with st.sidebar:
+            st.success(f"Logged in as {st.session_state.auth_name}")
+            if st.button("Logout"):
+                st.session_state.auth_ok = False
+                st.session_state.auth_user = None
+                st.session_state.auth_name = None
+                st.rerun()
+        return
 
-# Different versions return slightly different tuples; handle safely
-name = authentication_status = username = None
-if isinstance(login_result, tuple):
-    if len(login_result) >= 3:
-        name, authentication_status, username = login_result[0], login_result[1], login_result[2]
-    elif len(login_result) == 2:
-        name, authentication_status = login_result[0], login_result[1]
-else:
-    authentication_status = login_result
+    # Otherwise, show login form and stop the app
+    st.title("Login")
+    with st.form("login_form", clear_on_submit=False):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
 
-if authentication_status is False:
-    st.error("Username/password is incorrect")
-elif authentication_status is None:
+    if submit:
+        user = (username or "").strip().lower()
+        if user in creds and password == creds[user]["password"]:
+            st.session_state.auth_ok = True
+            st.session_state.auth_user = user
+            st.session_state.auth_name = creds[user]["name"]
+            st.rerun()
+        else:
+            st.error("Incorrect username or password")
+
     st.info("Please log in to continue.")
     st.stop()
 
-authenticator.logout(location="sidebar")
-st.session_state["user"] = {"username": username, "name": name}
+require_login()
 
 st.set_page_config(page_title="Bavarium Maintenance Planner", layout="centered")
 
