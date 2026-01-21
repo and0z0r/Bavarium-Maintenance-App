@@ -178,7 +178,6 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict):
         # Show real error so we can finish this fast
         st.error(f"DB save failed: {type(e).__name__}: {e}")
 
-
 # -------------------------
 # VIN helpers
 # -------------------------
