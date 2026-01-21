@@ -24,21 +24,36 @@ from typing import Optional
 import streamlit as st
 import streamlit_authenticator as stauth
 
+# -------------------------
+# LOGIN (TEMP: plain text; will move to Streamlit Secrets next)
+# -------------------------
 credentials = {
     "usernames": {
-        "andrew": {"name": "Andrew Gomes", "password": "PLACEHOLDER_HASH"},
-        "erin": {"name": "Erin Gomes", "password": "PLACEHOLDER_HASH"},
+        "andrew": {"name": "Andrew Gomes", "password": "changeme1"},
+        "erin": {"name": "Erin Gomes", "password": "changeme2"},
     }
 }
 
 authenticator = stauth.Authenticate(
     credentials,
-    "bavarium_auth",
-    "bavarium_cookie_key_change_me",
-    30
+    cookie_name="bavarium_auth",
+    cookie_key="bavarium_cookie_key_change_me",
+    cookie_expiry_days=30,
+    auto_hash=True,  # important: hashes the plain text above automatically
 )
 
-name, authentication_status, username = authenticator.login(location="main")
+# Use keyword args to survive API changes
+login_result = authenticator.login(location="main")
+
+# Different versions return slightly different tuples; handle safely
+name = authentication_status = username = None
+if isinstance(login_result, tuple):
+    if len(login_result) >= 3:
+        name, authentication_status, username = login_result[0], login_result[1], login_result[2]
+    elif len(login_result) == 2:
+        name, authentication_status = login_result[0], login_result[1]
+else:
+    authentication_status = login_result
 
 if authentication_status is False:
     st.error("Username/password is incorrect")
