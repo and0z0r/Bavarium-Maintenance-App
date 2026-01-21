@@ -16,6 +16,11 @@
 # - Per-service due-soon thresholds (miles + months) configurable in Settings page
 #
 # Run: python -m streamlit run app.py
+import json
+import uuid
+from datetime import datetime, timezone
+
+import psycopg
 
 import streamlit as st
 from datetime import date
@@ -112,6 +117,79 @@ NUM_TO_MONTH_LABEL = {i: MONTHS[i - 1] for i in range(1, 13)}
 
 # Admin
 ADMIN_PASSWORD_DEFAULT = "bavarium"
+
+# -------------------------
+# DB (Neon Postgres) helpers
+# -------------------------
+MANAGER_USERS = {"andrew", "erin"}  # managers only for now
+
+@st.cache_resource(show_spinner=False)
+def get_db_conn():
+    db_url = st.secrets["database"]["url"]
+    # Neon requires SSL; URL already includes sslmode=require.
+    return psycopg.connect(db_url)
+
+def save_template_submission_if_manager(vehicle: dict, intervals: dict):
+    """
+    Managers-only. Requires FULL VIN. Saves a pending submission into Neon.
+    """
+    user = (st.session_state.get("auth_user") or "").strip().lower()
+    if user not in MANAGER_USERS:
+        return  # managers only
+
+    vin = (vehicle.get("vin") or "").strip().upper()
+    if len(vin) != 17:
+        # Required for template approvals/saving
+        st.toast("Template not saved: full 17-char VIN required.", icon="⚠️")
+        return
+
+    payload = {
+        "vin": vin,
+        "year": int(vehicle["year"]),
+        "make": str(vehicle["make"]),
+        "model": str(vehicle["model"]),
+        # raw for now; we’ll normalize to engine/trans keys during approval
+        "engine_raw": str(vehicle.get("engine") or "").strip(),
+        "trans_raw": str(vehicle.get("trans") or "").strip(),
+        "intervals_proposed": intervals,  # dict -> json
+        "created_by": user,
+    }
+
+    submission_id = str(uuid.uuid4())
+
+    try:
+        conn = get_db_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO template_submissions (
+                  submission_id, created_by, vin, year, make, model,
+                  engine_raw, trans_raw, intervals_proposed, manager_state
+                )
+                VALUES (
+                  %(submission_id)s, %(created_by)s, %(vin)s, %(year)s, %(make)s, %(model)s,
+                  %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending'
+                )
+                """,
+                {
+                    "submission_id": submission_id,
+                    "created_by": payload["created_by"],
+                    "vin": payload["vin"],
+                    "year": payload["year"],
+                    "make": payload["make"],
+                    "model": payload["model"],
+                    "engine_raw": payload["engine_raw"],
+                    "trans_raw": payload["trans_raw"],
+                    "intervals_proposed": json.dumps(payload["intervals_proposed"]),
+                },
+            )
+            conn.commit()
+
+        st.toast("Saved template submission (pending).", icon="✅")
+
+    except Exception:
+        # Don’t leak DB details to the UI; just a gentle message.
+        st.toast("Could not save template submission (check DB settings).", icon="❌")
 
 # -------------------------
 # VIN helpers
