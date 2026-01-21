@@ -57,7 +57,6 @@ else:
 
 if authentication_status is False:
     st.error("Username/password is incorrect")
-    st.stop()
 elif authentication_status is None:
     st.info("Please log in to continue.")
     st.stop()
