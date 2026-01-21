@@ -21,6 +21,42 @@ import streamlit as st
 from datetime import date
 import requests
 from typing import Optional
+import streamlit as st
+import streamlit_authenticator as stauth
+
+# -------------------------
+# LOGIN (TEMP: hardcoded users)
+# We'll move these into Streamlit Secrets next.
+# -------------------------
+names = ["Andrew Gomes", "Erin Gomes"]
+usernames = ["andrew", "erin"]
+
+# TEMP passwords (we'll hash properly next)
+passwords = ["changeme1", "changeme2"]
+
+hashed_passwords = stauth.Hasher(passwords).generate()
+
+authenticator = stauth.Authenticate(
+    {"usernames": {
+        usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
+        usernames[1]: {"name": names[1], "password": hashed_passwords[1]},
+    }},
+    "bavarium_auth",   # cookie name
+    "bavarium_cookie_key_change_me",  # cookie key (we'll replace)
+    30                 # days
+)
+
+name, authentication_status, username = authenticator.login("Login", "main")
+
+if authentication_status is False:
+    st.error("Username/password is incorrect")
+    st.stop()
+if authentication_status is None:
+    st.info("Please log in to continue.")
+    st.stop()
+
+authenticator.logout("Logout", "sidebar")
+st.session_state["user"] = {"username": username, "name": name}
 
 st.set_page_config(page_title="Bavarium Maintenance Planner", layout="centered")
 
