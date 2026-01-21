@@ -123,73 +123,61 @@ ADMIN_PASSWORD_DEFAULT = "bavarium"
 # -------------------------
 MANAGER_USERS = {"andrew", "erin"}  # managers only for now
 
-@st.cache_resource(show_spinner=False)
-def get_db_conn():
-    db_url = st.secrets["database"]["url"]
-    # Neon requires SSL; URL already includes sslmode=require.
-    return psycopg.connect(db_url)
-
 def save_template_submission_if_manager(vehicle: dict, intervals: dict):
     """
     Managers-only. Requires FULL VIN. Saves a pending submission into Neon.
+    If it fails, shows the actual error (for debugging).
     """
     user = (st.session_state.get("auth_user") or "").strip().lower()
     if user not in MANAGER_USERS:
-        return  # managers only
-
-    vin = (vehicle.get("vin") or "").strip().upper()
-    if len(vin) != 17:
-        # Required for template approvals/saving
-        st.toast("Template not saved: full 17-char VIN required.", icon="⚠️")
+        st.write("DEBUG: not a manager user:", user)
         return
 
-    payload = {
-        "vin": vin,
-        "year": int(vehicle["year"]),
-        "make": str(vehicle["make"]),
-        "model": str(vehicle["model"]),
-        # raw for now; we’ll normalize to engine/trans keys during approval
-        "engine_raw": str(vehicle.get("engine") or "").strip(),
-        "trans_raw": str(vehicle.get("trans") or "").strip(),
-        "intervals_proposed": intervals,  # dict -> json
-        "created_by": user,
-    }
+    vin = (vehicle.get("vin") or "").strip().upper()
+    st.write("DEBUG VIN:", vin)  # keep this for now
 
-    submission_id = str(uuid.uuid4())
+    if len(vin) != 17:
+        st.warning("Template not saved: full 17-char VIN required.")
+        return
+
+    db_url = st.secrets["database"]["url"]
 
     try:
-        conn = get_db_conn()
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO template_submissions (
-                  submission_id, created_by, vin, year, make, model,
-                  engine_raw, trans_raw, intervals_proposed, manager_state
-                )
-                VALUES (
-                  %(submission_id)s, %(created_by)s, %(vin)s, %(year)s, %(make)s, %(model)s,
-                  %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending'
-                )
-                """,
-                {
-                    "submission_id": submission_id,
-                    "created_by": payload["created_by"],
-                    "vin": payload["vin"],
-                    "year": payload["year"],
-                    "make": payload["make"],
-                    "model": payload["model"],
-                    "engine_raw": payload["engine_raw"],
-                    "trans_raw": payload["trans_raw"],
-                    "intervals_proposed": json.dumps(payload["intervals_proposed"]),
-                },
-            )
-            conn.commit()
+        submission_id = str(uuid.uuid4())
 
-        st.toast("Saved template submission (pending).", icon="✅")
+        # Fresh connection every time (no caching, avoids stale/closed connections)
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO template_submissions (
+                      submission_id, created_by, vin, year, make, model,
+                      engine_raw, trans_raw, intervals_proposed, manager_state
+                    )
+                    VALUES (
+                      %(submission_id)s, %(created_by)s, %(vin)s, %(year)s, %(make)s, %(model)s,
+                      %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending'
+                    )
+                    """,
+                    {
+                        "submission_id": submission_id,
+                        "created_by": user,
+                        "vin": vin,
+                        "year": int(vehicle["year"]),
+                        "make": str(vehicle["make"]),
+                        "model": str(vehicle["model"]),
+                        "engine_raw": str(vehicle.get("engine") or "").strip(),
+                        "trans_raw": str(vehicle.get("trans") or "").strip(),
+                        "intervals_proposed": json.dumps(intervals),
+                    },
+                )
 
-    except Exception:
-        # Don’t leak DB details to the UI; just a gentle message.
-        st.toast("Could not save template submission (check DB settings).", icon="❌")
+        st.success("Saved template submission (pending).")
+
+    except Exception as e:
+        # Show real error so we can finish this fast
+        st.error(f"DB save failed: {type(e).__name__}: {e}")
+
 
 # -------------------------
 # VIN helpers
