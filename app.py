@@ -1147,6 +1147,9 @@ elif st.session_state.step == "history":
                 "na": na,
                 "bulk_lines": bulk_lines,
             }
+     
+            save_template_submission_if_manager(v, st.session_state.intervals)
+
             st.session_state.step = "results"
             st.rerun()
 
