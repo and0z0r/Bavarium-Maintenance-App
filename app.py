@@ -1147,7 +1147,8 @@ elif st.session_state.step == "history":
                 "na": na,
                 "bulk_lines": bulk_lines,
             }
-     
+            st.write("DEBUG VIN:", v.get("vin"))
+
             save_template_submission_if_manager(v, st.session_state.intervals)
 
             st.session_state.step = "results"
