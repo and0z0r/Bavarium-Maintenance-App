@@ -148,6 +148,9 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict):
         # Fresh connection every time (no caching, avoids stale/closed connections)
         with psycopg.connect(db_url) as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT current_database(), current_user, inet_server_addr(), inet_server_port()")
+                st.write("DEBUG DB:", cur.fetchone())
+
                 cur.execute(
                     """
                     INSERT INTO template_submissions (
@@ -171,6 +174,8 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict):
                         "intervals_proposed": json.dumps(intervals),
                     },
                 )
+        cur.execute("SELECT COUNT(*) FROM template_submissions")
+        st.write("DEBUG rows in template_submissions:", cur.fetchone()[0])
 
         st.success("Saved template submission (pending).")
 
