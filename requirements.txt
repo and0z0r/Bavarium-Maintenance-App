@@ -1,4 +1,3 @@
 streamlit
 requests
-streamlit-authenticator
-PyYAML
+psycopg[binary]
