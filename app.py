@@ -1289,12 +1289,12 @@ with colC:
 # -------------------------
 # SCREEN 4 — Results
 # -------------------------
-elif st.session_state.step == "results":
-    v = st.session_state.vehicle
-    r = st.session_state.results or {"due_now": [], "due_soon": [], "ok": [], "na": [], "bulk_lines": []}
-
-    st.title("Results")
-    st.caption(f"{v['year']} {v['make']} {v['model']} • {v['current_miles']:,} miles")
+    elif st.session_state.step == "results":
+        v = st.session_state.vehicle
+        r = st.session_state.results or {"due_now": [], "due_soon": [], "ok": [], "na": [], "bulk_lines": []}
+    
+        st.title("Results")
+        st.caption(f"{v['year']} {v['make']} {v['model']} • {v['current_miles']:,} miles")
 
     # Show DB save result clearly (managers-only)
     if is_manager() and st.session_state.last_db_save_msg:
@@ -1483,6 +1483,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
