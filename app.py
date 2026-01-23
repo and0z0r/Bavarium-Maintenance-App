@@ -86,32 +86,37 @@ MANAGER_USERS = {"andrew", "erin"}
 
 
 # -------------------------
-# Simple Login (stable)
+# Simple Login + User Management via Streamlit Secrets
 # -------------------------
-def require_login():
+def get_users_dict() -> dict:
     """
-    Stable login gate using Streamlit Secrets (TOML).
-    Expects:
-      st.secrets["credentials"]["usernames"][<username>] = {"name":..., "password":...}
+    Expects Streamlit secrets:
+      [users]
+      username = { name="...", password="...", role="manager|shop" }
     """
-    if "credentials" not in st.secrets:
-        st.error("Missing Streamlit Secrets: [credentials]. Add credentials in Manage App → Secrets.")
+    if "users" not in st.secrets:
+        st.error("Missing [users] in Streamlit Secrets.")
         st.stop()
+    return dict(st.secrets["users"])
 
-    creds = st.secrets["credentials"]["usernames"]
+
+def require_login():
+    users = get_users_dict()
 
     if "auth_ok" not in st.session_state:
         st.session_state.auth_ok = False
         st.session_state.auth_user = None
         st.session_state.auth_name = None
+        st.session_state.auth_role = None
 
     if st.session_state.auth_ok:
         with st.sidebar:
-            st.success(f"Logged in: {st.session_state.auth_name}")
+            st.success(f"Logged in: {st.session_state.auth_name} ({st.session_state.auth_role})")
             if st.button("Logout"):
                 st.session_state.auth_ok = False
                 st.session_state.auth_user = None
                 st.session_state.auth_name = None
+                st.session_state.auth_role = None
                 st.rerun()
         return
 
@@ -122,10 +127,12 @@ def require_login():
         submit = st.form_submit_button("Login")
 
     if submit:
-        if username in creds and password == creds[username]["password"]:
+        u = users.get(username)
+        if u and password == str(u.get("password", "")):
             st.session_state.auth_ok = True
             st.session_state.auth_user = username
-            st.session_state.auth_name = creds[username]["name"]
+            st.session_state.auth_name = str(u.get("name", username))
+            st.session_state.auth_role = str(u.get("role", "shop"))
             st.rerun()
         else:
             st.error("Incorrect username or password")
@@ -138,8 +145,7 @@ require_login()
 
 
 def is_manager() -> bool:
-    return (st.session_state.get("auth_user") or "").strip().lower() in MANAGER_USERS
-
+    return (st.session_state.get("auth_role") or "") == "manager"
 
 # -------------------------
 # VIN helpers
@@ -1472,3 +1478,4 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
