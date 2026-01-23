@@ -1265,11 +1265,11 @@ elif st.session_state.step == "history":
                 "bulk_lines": bulk_lines,
             }
 
-            # Save submission to Neon (managers-only, full VIN required)
-            save_template_submission_if_manager(v, st.session_state.intervals, st.session_state.results)
+# Save submission to Neon (shop + managers → pending review, full VIN required)
+save_submission_for_review(v, st.session_state.intervals)
 
-            st.session_state.step = "results"
-            st.rerun()
+st.session_state.step = "results"
+st.rerun()
 
 
 # -------------------------
@@ -1469,5 +1469,6 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
