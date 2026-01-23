@@ -1,14 +1,13 @@
-# Bavarium Maintenance Planner — BETA 0.2 (Cloud-ready)
-# Streamlit single-file app + managers-only login + Neon Postgres submissions
+# Bavarium Maintenance Planner — BETA 0.3 (Cloud-ready)
+# Streamlit single-file app + managers-only login + Neon Postgres submissions + Manager Review workflow
 #
-# Flow: Login → Vehicle → Intervals → History → Results (+ Settings)
+# Flow: Login → Vehicle → Intervals → History → Results (+ Settings + Manager Review)
 #
-# Key additions vs 0.1:
-# - Stable simple login (Streamlit Secrets) — no streamlit-authenticator
-# - Managers-only: Andrew + Erin
-# - Neon Postgres: save template submissions on "Calculate Results →"
-#   • Requires full VIN (17 chars)
-#   • Saves to template_submissions with manager_state='pending'
+# Key additions vs 0.2:
+# - Saves full results + bulk_copy into template_submissions
+# - Stores last_submission_id in session so Results can update bulk_copy + vehicle_notes
+# - NEW: Manager Review screen (Pending / My / Approved / Denied) with Approve / Deny / Request Changes
+# - Review actions write an append-only audit row to template_reviews
 #
 # Streamlit Secrets (TOML) expected:
 #   [credentials.usernames.andrew]
@@ -27,7 +26,7 @@
 import json
 import uuid
 from datetime import date
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple, List
 
 import requests
 import streamlit as st
@@ -266,6 +265,10 @@ def ss_init():
     if "last_db_save_msg" not in st.session_state:
         st.session_state.last_db_save_msg = None
 
+    # Track last saved submission_id so Results can update it
+    if "last_submission_id" not in st.session_state:
+        st.session_state.last_submission_id = None
+
 
 ss_init()
 
@@ -322,11 +325,11 @@ def fmt_last_done(hist: dict, vehicle: dict) -> str:
     if hist.get("known"):
         ld = hist.get("last_date")
         lm = hist.get("last_miles")
-        if ld and lm is not None:
+        if ld and lm is not None and int(lm) > 0:
             return f"last {ld.strftime('%m/%Y')} @ {int(lm):,} mi"
         if ld:
             return f"last {ld.strftime('%m/%Y')}"
-        if lm is not None:
+        if lm is not None and int(lm) > 0:
             return f"last @ {int(lm):,} mi"
         return "history known (missing)"
 
@@ -345,7 +348,7 @@ def get_due_soon_months(item: str) -> int:
 # -------------------------
 # Core evaluation
 # -------------------------
-def evaluate_item(item: str, vehicle: dict, hist: dict) -> tuple[str, str, str, str]:
+def evaluate_item(item: str, vehicle: dict, hist: dict) -> Tuple[str, str, str, str]:
     """
     Returns (status, concise_line, verbose_line, bulk_line_or_empty)
       status: due_now | due_soon | ok | na
@@ -390,7 +393,7 @@ def evaluate_item(item: str, vehicle: dict, hist: dict) -> tuple[str, str, str, 
     next_due_time_verbose = None
 
     # Miles evaluation
-    if iv.get("miles") is not None and base_miles is not None:
+    if iv.get("miles") is not None and base_miles is not None and int(base_miles) > 0:
         due_at = int(base_miles) + int(iv["miles"])
         remaining = due_at - current_miles
 
@@ -458,7 +461,6 @@ def evaluate_item(item: str, vehicle: dict, hist: dict) -> tuple[str, str, str, 
     return (status, concise_line, verbose_line, bulk_line)
 
 
-
 # -------------------------
 # Interval auto-fill callbacks
 # -------------------------
@@ -493,18 +495,41 @@ def on_miles_change(item: str):
 
 
 # -------------------------
-# DB save (Neon) — template_submissions
+# DB helpers (Neon Postgres)
 # -------------------------
-def save_template_submission_if_manager(vehicle: dict, intervals: dict):
+def db_ready() -> bool:
+    if "database" not in st.secrets or "url" not in st.secrets["database"]:
+        return False
+    if psycopg is None:
+        return False
+    return True
+
+
+def db_url() -> str:
+    return st.secrets["database"]["url"]
+
+
+def db_exec(sql: str, params: Optional[Dict[str, Any]] = None, fetch: bool = False):
+    with psycopg.connect(db_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or {})
+            if fetch:
+                rows = cur.fetchall()
+                cols = [d.name for d in cur.description] if cur.description else []
+                return rows, cols
+    return None
+
+
+def save_template_submission_if_manager(vehicle: dict, intervals: dict, results: Optional[dict]):
     """
     Managers-only. Requires full VIN (17 chars).
     Saves a pending record into template_submissions.
-    Shows a clear on-screen result in st.session_state.last_db_save_msg.
+    Stores submission_id in st.session_state.last_submission_id for later review/update.
     """
     st.session_state.last_db_save_msg = None
+    st.session_state.last_submission_id = None
 
     if not is_manager():
-        # managers only for now
         return
 
     vin = (vehicle.get("vin") or "").strip().upper()
@@ -512,30 +537,31 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict):
         st.session_state.last_db_save_msg = "Template NOT saved: full 17-character VIN required."
         return
 
-    if "database" not in st.secrets or "url" not in st.secrets["database"]:
-        st.session_state.last_db_save_msg = "Template NOT saved: missing [database].url in Streamlit Secrets."
+    if not db_ready():
+        st.session_state.last_db_save_msg = "Template NOT saved: DB not ready (missing secrets or psycopg)."
         return
 
-    if psycopg is None:
-        st.session_state.last_db_save_msg = "Template NOT saved: psycopg not installed (check requirements.txt)."
-        return
-
-    db_url = st.secrets["database"]["url"]
     submission_id = str(uuid.uuid4())
     user = (st.session_state.get("auth_user") or "").strip().lower()
 
+    results_payload = results or {}
+    bulk_lines = results_payload.get("bulk_lines") or []
+    bulk_copy_text = "\n".join(bulk_lines) if isinstance(bulk_lines, list) else ""
+
     try:
-        with psycopg.connect(db_url) as conn:
+        with psycopg.connect(db_url()) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO template_submissions (
                       submission_id, created_by, vin, year, make, model,
-                      engine_raw, trans_raw, intervals_proposed, manager_state
+                      engine_raw, trans_raw, intervals_proposed, manager_state,
+                      bulk_copy, vehicle_notes, results_json, version
                     )
                     VALUES (
                       %(submission_id)s, %(created_by)s, %(vin)s, %(year)s, %(make)s, %(model)s,
-                      %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending'
+                      %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending',
+                      %(bulk_copy)s, %(vehicle_notes)s, %(results_json)s::jsonb, 1
                     )
                     """,
                     {
@@ -548,11 +574,153 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict):
                         "engine_raw": str(vehicle.get("engine") or "").strip(),
                         "trans_raw": str(vehicle.get("trans") or "").strip(),
                         "intervals_proposed": json.dumps(intervals),
+                        "bulk_copy": bulk_copy_text,
+                        "vehicle_notes": "",
+                        "results_json": json.dumps(results_payload),
                     },
                 )
+        st.session_state.last_submission_id = submission_id
         st.session_state.last_db_save_msg = "✅ Saved template submission (pending)."
     except Exception as e:
         st.session_state.last_db_save_msg = f"❌ Template NOT saved: {type(e).__name__}: {e}"
+
+
+def update_submission_content(submission_id: str, bulk_copy: str, vehicle_notes: str) -> str:
+    if not db_ready():
+        return "❌ DB not ready."
+    if not submission_id:
+        return "❌ No submission_id found."
+    try:
+        db_exec(
+            """
+            UPDATE template_submissions
+            SET bulk_copy = %(bulk_copy)s,
+                vehicle_notes = %(vehicle_notes)s,
+                updated_at = now()
+            WHERE submission_id = %(id)s
+            """,
+            {"id": submission_id, "bulk_copy": bulk_copy or "", "vehicle_notes": vehicle_notes or ""},
+        )
+        return "✅ Saved updates to submission."
+    except Exception as e:
+        return f"❌ Update failed: {type(e).__name__}: {e}"
+
+
+def fetch_submissions_by_state(state: str, limit: int = 50):
+    if not db_ready():
+        return [], []
+    out = db_exec(
+        """
+        SELECT submission_id, created_at, created_by, vin, year, make, model,
+               manager_state, bulk_copy, vehicle_notes, reviewed_at, reviewed_by, review_notes
+        FROM template_submissions
+        WHERE manager_state = %(state)s
+        ORDER BY created_at DESC
+        LIMIT %(limit)s
+        """,
+        {"state": state, "limit": limit},
+        fetch=True,
+    )
+    if not out:
+        return [], []
+    return out[0], out[1]
+
+
+def fetch_my_recent_submissions(created_by: str, limit: int = 50):
+    if not db_ready():
+        return [], []
+    out = db_exec(
+        """
+        SELECT submission_id, created_at, vin, year, make, model,
+               manager_state, bulk_copy, vehicle_notes, reviewed_at, reviewed_by, review_notes
+        FROM template_submissions
+        WHERE created_by = %(u)s
+        ORDER BY created_at DESC
+        LIMIT %(limit)s
+        """,
+        {"u": created_by, "limit": limit},
+        fetch=True,
+    )
+    if not out:
+        return [], []
+    return out[0], out[1]
+
+
+def review_submission(submission_id: str, action: str, notes: str) -> str:
+    """
+    action: approve | deny | request_changes
+    """
+    if not db_ready():
+        return "❌ DB not ready."
+    reviewer = (st.session_state.get("auth_user") or "").strip().lower()
+
+    new_state = {
+        "approve": "approved",
+        "deny": "denied",
+        "request_changes": "changes_requested",
+    }.get(action)
+
+    if not new_state:
+        return "❌ Invalid review action."
+
+    try:
+        # Snapshot for audit log
+        out = db_exec(
+            """
+            SELECT bulk_copy, vehicle_notes, vin, year, make, model, created_by, created_at, manager_state
+            FROM template_submissions
+            WHERE submission_id = %(id)s
+            """,
+            {"id": submission_id},
+            fetch=True,
+        )
+        snapshot = {}
+        if out and out[0]:
+            snapshot = dict(zip(out[1], out[0][0]))
+
+        # Append-only review log (UUID generated in Python)
+        db_exec(
+            """
+            INSERT INTO template_reviews (review_id, submission_id, reviewed_by, action, notes, snapshot)
+            VALUES (%(rid)s, %(sid)s, %(by)s, %(action)s, %(notes)s, %(snap)s::jsonb)
+            """,
+            {
+                "rid": str(uuid.uuid4()),
+                "sid": submission_id,
+                "by": reviewer,
+                "action": action,
+                "notes": notes or "",
+                "snap": json.dumps(snapshot),
+            },
+            fetch=False,
+        )
+
+        # Update submission state — guard against double finalization (must still be pending)
+        db_exec(
+            """
+            UPDATE template_submissions
+            SET manager_state = %(state)s,
+                reviewed_at = now(),
+                reviewed_by = %(by)s,
+                review_action = %(action)s,
+                review_notes = %(notes)s,
+                updated_at = now()
+            WHERE submission_id = %(id)s
+              AND manager_state = 'pending'
+            """,
+            {
+                "state": new_state,
+                "by": reviewer,
+                "action": action,
+                "notes": notes or "",
+                "id": submission_id,
+            },
+            fetch=False,
+        )
+
+        return f"✅ {new_state.upper()}."
+    except Exception as e:
+        return f"❌ Review failed: {type(e).__name__}: {e}"
 
 
 # -------------------------
@@ -579,6 +747,10 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
+    if st.button("🧾 Manager Review"):
+        st.session_state.step = "manager_review"
+        st.rerun()
+
     if st.button("⚙️ Settings"):
         st.session_state.step = "settings"
         st.rerun()
@@ -674,8 +846,8 @@ if st.session_state.step == "settings":
 # SCREEN 1 — Vehicle Intake
 # -------------------------
 if st.session_state.step == "vehicle":
-    st.title("Bavarium Maintenance Planner — BETA 0.2")
-    st.caption("Flow: Vehicle → Intervals → History → Results")
+    st.title("Bavarium Maintenance Planner — BETA 0.3")
+    st.caption("Flow: Vehicle → Intervals → History → Results (+ Review)")
 
     if not is_manager():
         st.warning("Managers-only mode is enabled. Please log in as a manager.")
@@ -842,7 +1014,11 @@ if st.session_state.step == "vehicle":
         }
 
         st.session_state.results = None
+        st.session_state.vin_decode = None
         st.session_state.last_db_save_msg = None
+        st.session_state.last_submission_id = None
+        st.session_state.pop("edited_bulk_copy", None)
+        st.session_state.pop("edited_vehicle_notes", None)
 
         # Clear interval/history widgets for fresh workflow
         for item in SERVICE_ITEMS:
@@ -866,7 +1042,7 @@ elif st.session_state.step == "intervals":
     st.caption(f"{v['year']} {v['make']} {v['model']} • {v['current_miles']:,} miles")
 
     st.info(
-        "Edit intervals for this visit (writer editable). One Use checkbox per line: unchecked = (N/A).\n\n"
+        "Edit intervals for this visit. One Use checkbox per line: unchecked = (N/A).\n\n"
         "Auto-miles rule: when Years is set, Miles auto-fills as Years × 10,000 (overrideable). "
         "To re-enable auto after overriding, set Miles back to 0."
     )
@@ -1093,7 +1269,7 @@ elif st.session_state.step == "history":
             }
 
             # Save submission to Neon (managers-only, full VIN required)
-            save_template_submission_if_manager(v, st.session_state.intervals)
+            save_template_submission_if_manager(v, st.session_state.intervals, st.session_state.results)
 
             st.session_state.step = "results"
             st.rerun()
@@ -1162,7 +1338,20 @@ elif st.session_state.step == "results":
     st.divider()
     st.subheader("Bulk Copy Box (Customer/RO — tight, 1 line each)")
     st.caption("Note: N/A items are automatically excluded from this box.")
-    st.text_area("All Lines", value="\n".join(r.get("bulk_lines", [])), height=260)
+
+    default_bulk = "\n".join(r.get("bulk_lines", []))
+    edited_bulk = st.text_area("All Lines", value=default_bulk, height=260, key="edited_bulk_copy")
+
+    st.subheader("Vehicle Notes (internal / dealer history summary)")
+    st.caption("Optional: anything you want Erin/Andy to see during review.")
+    notes = st.text_area("Notes", value=st.session_state.get("edited_vehicle_notes", ""), height=120, key="edited_vehicle_notes")
+
+    if is_manager() and st.session_state.get("last_submission_id"):
+        if st.button("💾 Update Saved Submission"):
+            msg = update_submission_content(st.session_state.last_submission_id, edited_bulk, notes)
+            (st.success if msg.startswith("✅") else st.error)(msg)
+    elif is_manager():
+        st.caption("No saved submission_id found for this run (did you have a full VIN?).")
 
     colA, colB = st.columns(2)
     with colA:
@@ -1179,12 +1368,107 @@ elif st.session_state.step == "results":
             st.session_state.results = None
             st.session_state.vin_decode = None
             st.session_state.last_db_save_msg = None
+            st.session_state.last_submission_id = None
 
             for k in ["veh_year", "veh_make", "veh_model", "veh_miles", "veh_engine", "veh_trans", "veh_drive", "veh_prod_unknown", "veh_prod_date"]:
                 st.session_state.pop(k, None)
 
+            st.session_state.pop("edited_bulk_copy", None)
+            st.session_state.pop("edited_vehicle_notes", None)
+
             st.rerun()
 
 
+# -------------------------
+# SCREEN — Manager Review
+# -------------------------
+elif st.session_state.step == "manager_review":
+    st.title("Manager Review")
+    st.caption("Erin ↔ Andy review queue. Approve / Deny / Request Changes.")
+
+    if not is_manager():
+        st.warning("Managers-only.")
+        st.stop()
+
+    if not db_ready():
+        st.error("DB not ready. Check Streamlit Secrets [database].url and psycopg dependency.")
+        st.stop()
+
+    me = (st.session_state.get("auth_user") or "").strip().lower()
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Pending Queue", "My Submissions", "Approved", "Denied"])
+
+    def render_cards(rows: List[tuple], cols: List[str], allow_actions: bool):
+        if not rows:
+            st.write("_None_")
+            return
+
+        for row in rows:
+            d = dict(zip(cols, row))
+            sid = str(d.get("submission_id"))
+            header = f"{d.get('year')} {d.get('make')} {d.get('model')} • VIN {d.get('vin')}"
+
+            created_at = d.get("created_at")
+            state = d.get("manager_state")
+            subtitle = f"{state} — {created_at}" if created_at else f"{state}"
+
+            with st.expander(f"{header}  —  {subtitle}", expanded=False):
+                st.write(f"**Created by:** {d.get('created_by')}")
+                if d.get("reviewed_by"):
+                    st.write(f"**Reviewed by:** {d.get('reviewed_by')} @ {d.get('reviewed_at')}")
+                if d.get("review_notes"):
+                    st.write(f"**Review notes:** {d.get('review_notes')}")
+
+                st.subheader("Bulk Copy")
+                st.text_area("bulk_copy", value=d.get("bulk_copy") or "", height=160, key=f"bulk_{sid}", disabled=True)
+
+                st.subheader("Vehicle Notes")
+                st.text_area("vehicle_notes", value=d.get("vehicle_notes") or "", height=120, key=f"notes_{sid}", disabled=True)
+
+                if allow_actions:
+                    st.divider()
+                    st.caption("Review action (only works if still Pending).")
+
+                    review_notes = st.text_input("Notes / Reason", value="", key=f"rn_{sid}")
+                    c1, c2, c3 = st.columns(3)
+
+                    with c1:
+                        if st.button("✅ Approve", key=f"ap_{sid}"):
+                            msg = review_submission(sid, "approve", review_notes)
+                            (st.success if msg.startswith("✅") else st.error)(msg)
+                            st.rerun()
+                    with c2:
+                        if st.button("🔁 Request Changes", key=f"rc_{sid}"):
+                            msg = review_submission(sid, "request_changes", review_notes)
+                            (st.success if msg.startswith("✅") else st.error)(msg)
+                            st.rerun()
+                    with c3:
+                        if st.button("❌ Deny", key=f"dn_{sid}"):
+                            msg = review_submission(sid, "deny", review_notes)
+                            (st.success if msg.startswith("✅") else st.error)(msg)
+                            st.rerun()
+
+    with tab1:
+        rows, cols = fetch_submissions_by_state("pending", limit=50)
+        render_cards(rows, cols, allow_actions=True)
+
+    with tab2:
+        rows, cols = fetch_my_recent_submissions(me, limit=50)
+        render_cards(rows, cols, allow_actions=False)
+
+    with tab3:
+        rows, cols = fetch_submissions_by_state("approved", limit=50)
+        render_cards(rows, cols, allow_actions=False)
+
+    with tab4:
+        rows, cols = fetch_submissions_by_state("denied", limit=50)
+        render_cards(rows, cols, allow_actions=False)
+
+    st.divider()
+    if st.button("← Back to Results"):
+        st.session_state.step = "results" if st.session_state.results else "vehicle"
+        st.rerun()
+
+
 # Footer
-st.caption("Bavarium Maintenance Planner — BETA 0.2")
+st.caption("Bavarium Maintenance Planner — BETA 0.3")
