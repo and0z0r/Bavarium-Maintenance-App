@@ -1393,9 +1393,9 @@ with colC:
 # -------------------------
 # SCREEN — Manager Review
 # -------------------------
-    elif st.session_state.step == "manager_review":
-        st.title("Manager Review")
-        st.caption("Erin ↔ Andy review queue. Approve / Deny / Request Changes.")
+elif st.session_state.step == "manager_review":
+    st.title("Manager Review")
+    st.caption("Erin ↔ Andy review queue. Approve / Deny / Request Changes.")
 
     if not is_manager():
         st.warning("Managers-only.")
@@ -1483,6 +1483,7 @@ with colC:
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
