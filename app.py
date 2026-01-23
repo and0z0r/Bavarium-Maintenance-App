@@ -366,20 +366,20 @@ def evaluate_item(item: str, vehicle: dict, hist: dict) -> Tuple[str, str, str, 
     due_soon_miles = get_due_soon_miles(item)
     due_soon_months = get_due_soon_months(item)
 
-# Baselines
-if hist.get("known"):
-    base_miles = hist.get("last_miles")
-    base_date = hist.get("last_date")
-else:
-    base_miles = 0
-
-    # If production date is unknown, assume Jan 1 of model year
-    if vehicle.get("production_date"):
-        base_date = vehicle.get("production_date")
+    # Baselines
+    if hist.get("known"):
+        base_miles = hist.get("last_miles")
+        base_date = hist.get("last_date")
     else:
-        base_date = date(int(vehicle["year"]), 1, 1)
-
-serviced_today = bool(hist.get("performed_this_visit", False))
+        base_miles = 0
+    
+        # If production date is unknown, assume Jan 1 of model year
+        if vehicle.get("production_date"):
+            base_date = vehicle.get("production_date")
+        else:
+            base_date = date(int(vehicle["year"]), 1, 1)
+    
+    serviced_today = bool(hist.get("performed_this_visit", False))
 
 
     # N/A
@@ -1489,6 +1489,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
