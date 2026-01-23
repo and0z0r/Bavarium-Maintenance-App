@@ -756,6 +756,11 @@ with st.sidebar:
 # -------------------------
 # SCREEN — Settings
 # -------------------------
+
+if not is_manager():
+    st.warning("Managers-only mode is enabled. Please log in as a manager.")
+    st.stop()
+       
 if st.session_state.step == "settings":
     st.title("Settings")
     st.caption("Per-service due-soon thresholds + bulk-copy bullets.")
@@ -1469,6 +1474,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
