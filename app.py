@@ -526,48 +526,43 @@ def db_exec(sql: str, params: Optional[Dict[str, Any]] = None, fetch: bool = Fal
     return None
 
 
-def save_template_submission_if_manager(vehicle: dict, intervals: dict, results: Optional[dict]):
+def save_submission_for_review(vehicle: dict, intervals: dict):
     """
-    Managers-only. Requires full VIN (17 chars).
-    Saves a pending record into template_submissions.
-    Stores submission_id in st.session_state.last_submission_id for later review/update.
+    Saves a pending submission for manager review.
+    - Runs for BOTH shop + managers
+    - Requires full 17-char VIN
     """
     st.session_state.last_db_save_msg = None
-    st.session_state.last_submission_id = None
-
-    if not is_manager():
-        return
 
     vin = (vehicle.get("vin") or "").strip().upper()
     if len(vin) != 17:
-        st.session_state.last_db_save_msg = "Template NOT saved: full 17-character VIN required."
+        st.session_state.last_db_save_msg = "Review NOT saved: full 17-character VIN required."
         return
 
-    if not db_ready():
-        st.session_state.last_db_save_msg = "Template NOT saved: DB not ready (missing secrets or psycopg)."
+    if "database" not in st.secrets or "url" not in st.secrets["database"]:
+        st.session_state.last_db_save_msg = "Review NOT saved: missing [database].url in Streamlit Secrets."
         return
 
+    if psycopg is None:
+        st.session_state.last_db_save_msg = "Review NOT saved: psycopg not installed (check requirements.txt)."
+        return
+
+    db_url = st.secrets["database"]["url"]
     submission_id = str(uuid.uuid4())
     user = (st.session_state.get("auth_user") or "").strip().lower()
 
-    results_payload = results or {}
-    bulk_lines = results_payload.get("bulk_lines") or []
-    bulk_copy_text = "\n".join(bulk_lines) if isinstance(bulk_lines, list) else ""
-
     try:
-        with psycopg.connect(db_url()) as conn:
+        with psycopg.connect(db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO template_submissions (
                       submission_id, created_by, vin, year, make, model,
-                      engine_raw, trans_raw, intervals_proposed, manager_state,
-                      bulk_copy, vehicle_notes, results_json, version
+                      engine_raw, trans_raw, intervals_proposed, manager_state
                     )
                     VALUES (
                       %(submission_id)s, %(created_by)s, %(vin)s, %(year)s, %(make)s, %(model)s,
-                      %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending',
-                      %(bulk_copy)s, %(vehicle_notes)s, %(results_json)s::jsonb, 1
+                      %(engine_raw)s, %(trans_raw)s, %(intervals_proposed)s::jsonb, 'pending'
                     )
                     """,
                     {
@@ -580,15 +575,11 @@ def save_template_submission_if_manager(vehicle: dict, intervals: dict, results:
                         "engine_raw": str(vehicle.get("engine") or "").strip(),
                         "trans_raw": str(vehicle.get("trans") or "").strip(),
                         "intervals_proposed": json.dumps(intervals),
-                        "bulk_copy": bulk_copy_text,
-                        "vehicle_notes": "",
-                        "results_json": json.dumps(results_payload),
                     },
                 )
-        st.session_state.last_submission_id = submission_id
-        st.session_state.last_db_save_msg = "✅ Saved template submission (pending)."
+        st.session_state.last_db_save_msg = "✅ Saved for manager review (pending)."
     except Exception as e:
-        st.session_state.last_db_save_msg = f"❌ Template NOT saved: {type(e).__name__}: {e}"
+        st.session_state.last_db_save_msg = f"❌ Review NOT saved: {type(e).__name__}: {e}"
 
 
 def update_submission_content(submission_id: str, bulk_copy: str, vehicle_notes: str) -> str:
@@ -1478,4 +1469,5 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
