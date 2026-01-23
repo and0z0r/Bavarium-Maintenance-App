@@ -846,9 +846,9 @@ if st.session_state.step == "vehicle":
     st.title("Bavarium Maintenance Planner — BETA 0.3")
     st.caption("Flow: Vehicle → Intervals → History → Results (+ Review)")
 
-    if not is_manager():
-        st.warning("Managers-only mode is enabled. Please log in as a manager.")
-        st.stop()
+ ##   if not is_manager():
+ ##       st.warning("Managers-only mode is enabled. Please log in as a manager.")
+ ##        st.stop()
 
     # Widget state mirrors vehicle state
     if "veh_year" not in st.session_state:
@@ -1469,6 +1469,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
