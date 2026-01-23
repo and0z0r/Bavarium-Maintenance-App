@@ -756,6 +756,18 @@ with st.sidebar:
 # -------------------------
 # SCREEN — Settings
 # -------------------------
+
+elif st.session_state.step == "settings":
+    st.title("Settings")
+
+    if not is_manager():
+        st.error("Managers only.")
+        if st.button("← Back"):
+            st.session_state.step = "vehicle"
+            st.rerun()
+        st.stop()
+
+    # ---- settings content below this line ----
        
 if st.session_state.step == "settings":
     st.title("Settings")
@@ -1470,6 +1482,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
