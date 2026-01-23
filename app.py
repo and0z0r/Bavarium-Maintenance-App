@@ -1240,49 +1240,50 @@ elif st.session_state.step == "history":
                 data["last_miles"] = None
                 data["last_date"] = None
 
-    colA, colB, colC = st.columns(3)
-    with colA:
-        if st.button("← Back"):
-            st.session_state.step = "intervals"
-            st.rerun()
-    with colB:
-        if st.button("Edit Intervals"):
-            st.session_state.step = "intervals"
-            st.rerun()
-    with colC:
-        if st.button("Calculate Results →"):
-            due_now, due_soon, ok, na = [], [], [], []
-            bulk_lines = []
+colA, colB, colC = st.columns(3)
+with colA:
+    if st.button("← Back"):
+        st.session_state.step = "intervals"
+        st.rerun()
+with colB:
+    if st.button("Edit Intervals"):
+        st.session_state.step = "intervals"
+        st.rerun()
+with colC:
+    if st.button("Calculate Results →"):
+        due_now, due_soon, ok, na = [], [], [], []
+        bulk_lines = []
 
-            for item in SERVICE_ITEMS:
-                status, concise, verbose, bulk_line = evaluate_item(item, v, st.session_state.history[item])
-                payload = {"item": item, "concise": concise, "verbose": verbose, "bulk": bulk_line}
+        for item in SERVICE_ITEMS:
+            status, concise, verbose, bulk_line = evaluate_item(item, v, st.session_state.history[item])
+            payload = {"item": item, "concise": concise, "verbose": verbose, "bulk": bulk_line}
 
-                if status == "due_now":
-                    due_now.append(payload)
-                elif status == "due_soon":
-                    due_soon.append(payload)
-                elif status == "ok":
-                    ok.append(payload)
-                else:
-                    na.append(payload)
+            if status == "due_now":
+                due_now.append(payload)
+            elif status == "due_soon":
+                due_soon.append(payload)
+            elif status == "ok":
+                ok.append(payload)
+            else:
+                na.append(payload)
 
-                if bulk_line:
-                    bulk_lines.append(bulk_line)
+            if bulk_line:
+                bulk_lines.append(bulk_line)
 
-            st.session_state.results = {
-                "due_now": due_now,
-                "due_soon": due_soon,
-                "ok": ok,
-                "na": na,
-                "bulk_lines": bulk_lines,
-            }
+        st.session_state.results = {
+            "due_now": due_now,
+            "due_soon": due_soon,
+            "ok": ok,
+            "na": na,
+            "bulk_lines": bulk_lines,
+        }
 
-    # Save submission to Neon (shop + managers → pending review, full VIN required)
-    save_submission_for_review(v, st.session_state.intervals)
-    
-    st.session_state.step = "results"
-    st.rerun()
+        # Save submission to Neon (shop + managers → pending review, full VIN required)
+        save_submission_for_review(v, st.session_state.intervals)
+
+        st.session_state.step = "results"
+        st.rerun()
+
 
 
 # -------------------------
@@ -1482,6 +1483,7 @@ elif st.session_state.step == "manager_review":
 
 # Footer
 st.caption("Bavarium Maintenance Planner — BETA 0.3")
+
 
 
 
